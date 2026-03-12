@@ -16,11 +16,7 @@ const spring = { type: "spring", stiffness: 100, damping: 20 };
 
 const businessTypes = [
   { id: 'auto', icon: Car, label: 'Auto Shop', desc: 'Repair, body work, detailing' },
-  { id: 'barber', icon: Scissors, label: 'Barbershop / Salon', desc: 'Haircuts, styling, grooming' },
-  { id: 'restaurant', icon: ForkKnife, label: 'Restaurant / Cafe', desc: 'Food service, catering' },
-  { id: 'retail', icon: ShoppingCart, label: 'Retail Store', desc: 'Products, inventory, sales' },
-  { id: 'trades', icon: Wrench, label: 'Trades / Contractor', desc: 'Plumbing, electrical, HVAC' },
-  { id: 'other', icon: Storefront, label: 'Other Business', desc: 'Custom configuration' },
+  { id: 'coming_soon', icon: Storefront, label: 'Other Businesses', desc: 'More service industries coming soon', disabled: true },
 ];
 
 const prefillData = {
@@ -184,24 +180,42 @@ export const Onboarding = () => {
                   <h1 className="text-3xl md:text-4xl font-medium tracking-tighter text-zinc-950 mb-3">What kind of business do you run?</h1>
                   <p className="text-zinc-500 text-[15px] max-w-md mx-auto">Our AI specializes itself based on your industry - custom alerts, language, and forecasting models.</p>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-4 max-w-lg mx-auto">
                   {businessTypes.map((type) => {
                     const BusinessIcon = type.icon;
                     return (
-                      <motion.button key={type.id} whileTap={{ scale: 0.98 }}
-                        onClick={() => handleTypeSelect(type.id)}
-                        className={`flex items-center gap-4 p-5 rounded-2xl border-2 text-left transition-all duration-200 ${
-                          selectedType === type.id ? 'border-zinc-900 bg-zinc-950 text-white shadow-[0_8px_24px_rgba(0,0,0,0.12)]' : 'border-zinc-200 bg-white text-zinc-900 hover:border-zinc-400'
+                      <motion.button key={type.id} whileTap={type.disabled ? {} : { scale: 0.98 }}
+                        onClick={() => !type.disabled && handleTypeSelect(type.id)}
+                        disabled={type.disabled}
+                        className={`flex items-center gap-5 p-6 rounded-2xl border-2 text-left transition-all duration-300 relative overflow-hidden ${
+                          type.disabled 
+                            ? 'border-zinc-200/50 bg-zinc-50/50 opacity-60 cursor-not-allowed' 
+                            : selectedType === type.id 
+                                ? 'border-zinc-900 bg-zinc-950 text-white shadow-[0_8px_30px_rgba(0,0,0,0.12)] cursor-pointer' 
+                                : 'border-zinc-200 bg-white text-zinc-900 hover:border-zinc-300 hover:shadow-[0_4px_20px_rgba(0,0,0,0.04)] cursor-pointer'
                         }`}
                       >
-                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${selectedType === type.id ? 'bg-zinc-800' : 'bg-zinc-50 border border-zinc-200'}`}>
-                          <BusinessIcon size={22} weight="duotone" className={selectedType === type.id ? 'text-white' : 'text-zinc-600'} />
+                        {selectedType === type.id && !type.disabled && (
+                          <motion.div 
+                            layoutId="active-outline"
+                            className="absolute inset-0 border-2 border-zinc-900 rounded-2xl pointer-events-none"
+                            transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                          />
+                        )}
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 transition-colors duration-300 ${
+                          selectedType === type.id && !type.disabled ? 'bg-zinc-800' : 'bg-zinc-100/80 border border-zinc-200/60'
+                        }`}>
+                          <BusinessIcon size={24} weight={selectedType === type.id && !type.disabled ? "fill" : "duotone"} className={selectedType === type.id && !type.disabled ? 'text-white' : 'text-zinc-500'} />
                         </div>
-                        <div className="min-w-0">
-                          <div className="font-medium text-[15px]">{type.label}</div>
-                          <div className={`text-[13px] ${selectedType === type.id ? 'text-zinc-400' : 'text-zinc-500'}`}>{type.desc}</div>
+                        <div className="min-w-0 pr-8">
+                          <div className={`font-semibold text-[16px] tracking-tight ${type.disabled ? 'text-zinc-500' : ''}`}>{type.label}</div>
+                          <div className={`text-[14px] leading-relaxed mt-0.5 ${selectedType === type.id && !type.disabled ? 'text-zinc-400' : 'text-zinc-500'}`}>{type.desc}</div>
                         </div>
-                        {selectedType === type.id && <CheckCircle size={20} weight="fill" className="text-white ml-auto shrink-0" />}
+                        {selectedType === type.id && !type.disabled && (
+                          <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="absolute right-6 top-1/2 -translate-y-1/2">
+                            <CheckCircle size={24} weight="fill" className="text-white shrink-0" />
+                          </motion.div>
+                        )}
                       </motion.button>
                     );
                   })}
