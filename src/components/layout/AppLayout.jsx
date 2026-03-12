@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { useAppContext } from '../../context/useAppContext';
 import { X, CheckCircle } from '@phosphor-icons/react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { RouteSkeleton } from '../ui/RouteSkeleton';
 
 void motion;
 
@@ -15,7 +16,9 @@ export const AppLayout = () => {
       <Sidebar />
       <main className="flex-1 overflow-y-auto px-8 py-10 lg:px-12 lg:py-14 relative flex justify-center">
         <div className="w-full max-w-[1200px] mx-auto z-10 relative">
-          <Outlet />
+          <Suspense fallback={<RouteSkeleton embedded />}>
+            <Outlet />
+          </Suspense>
         </div>
       </main>
 
