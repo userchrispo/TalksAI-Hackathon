@@ -369,6 +369,22 @@ export const Assistant = () => {
       return;
     }
 
+    if (isDemoMode) {
+      const fallback = buildFallbackReply(question, nextPayload.promptId);
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: 'ai',
+          headline: fallback.headline,
+          rows: fallback.rows,
+          summary: fallback.summary,
+          actions: fallback.actions,
+          source: 'fallback',
+        },
+      ]);
+      return;
+    }
+
     setIsTyping(true);
 
     fetch('/api/chat', {

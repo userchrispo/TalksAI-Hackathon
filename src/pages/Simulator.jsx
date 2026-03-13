@@ -296,6 +296,24 @@ export const Simulator = () => {
       return;
     }
 
+    if (isDemoMode) {
+      const fallback = matchScenario(question, nextPayload.promptId);
+      setAiResult(null);
+      runSharedScenario(
+        {
+          label: fallback.label,
+          aiText: fallback.summary,
+          monthlyImpact: fallback.monthlyImpact,
+        },
+        { question: fallback.question || question, source: fallback.source || 'fallback' },
+      );
+      setStatusBanner({
+        tone: 'neutral',
+        message: 'Guided demo scenario loaded.',
+      });
+      return;
+    }
+
     setIsThinking(true);
     setAiResult(null);
     setStatusBanner({
