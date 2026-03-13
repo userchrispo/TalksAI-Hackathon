@@ -19,7 +19,7 @@ export const TopNav = ({ showLogin = true }) => {
         
         {showLogin && (
           <div className="flex items-center gap-6">
-            <Link to="/auth" className="text-sm font-medium text-zinc-900 transition-colors hidden sm:block">Log in</Link>
+            <Link to="/demo" className="text-sm font-medium text-zinc-900 transition-colors hidden sm:block">View Demo</Link>
             <Link to="/auth">
               <Button variant="primary" className="shadow-[0_8px_16px_rgba(0,0,0,0.12)]">Start free trial</Button>
             </Link>

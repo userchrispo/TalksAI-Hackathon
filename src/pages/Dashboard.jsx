@@ -71,9 +71,17 @@ export const Dashboard = () => {
     >
       <motion.div variants={itemVariants} className="flex flex-col gap-5 md:flex-row md:justify-between md:items-end mb-12 border-b border-zinc-200 pb-6">
         <div>
-          <h1 className="text-4xl tracking-tight font-medium text-zinc-950 mb-2">Overview</h1>
+          <h1 className="text-4xl tracking-tight font-medium text-zinc-950 mb-2">
+            {(() => {
+              const hour = new Date().getHours();
+              const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+              const firstName = profile.ownerName.split(' ')[0];
+              return `${greeting}, ${firstName}`;
+            })()}
+          </h1>
           <p className="text-zinc-500 text-lg">
-            {profile.shopName} is connected via {bankConnection.name}.
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            {' \u2014 '}{profile.shopName}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">

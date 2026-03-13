@@ -1,8 +1,8 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { useAppContext } from '../../context/useAppContext';
-import { X, CheckCircle } from '@phosphor-icons/react';
+import { X, CheckCircle, List } from '@phosphor-icons/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { RouteSkeleton } from '../ui/RouteSkeleton';
 
@@ -10,11 +10,33 @@ void motion;
 
 export const AppLayout = () => {
   const { toasts, removeToast } = useAppContext();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-white">
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto px-8 py-10 lg:px-12 lg:py-14 relative flex justify-center">
+    <div className="flex h-[100dvh] w-screen overflow-hidden bg-white">
+      {/* Mobile hamburger */}
+      <button
+        onClick={() => setSidebarOpen(true)}
+        className="lg:hidden fixed top-5 left-5 z-50 w-10 h-10 bg-zinc-950 text-white rounded-xl flex items-center justify-center shadow-lg"
+      >
+        <List size={20} weight="bold" />
+      </button>
+
+      {/* Mobile overlay */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setSidebarOpen(false)}
+            className="lg:hidden fixed inset-0 bg-zinc-950/50 z-40 backdrop-blur-sm"
+          />
+        )}
+      </AnimatePresence>
+
+      <Sidebar mobileOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <main className="flex-1 overflow-y-auto px-4 py-16 lg:px-12 lg:py-14 relative flex justify-center">
         <div className="w-full max-w-[1200px] mx-auto z-10 relative">
           <Suspense fallback={<RouteSkeleton embedded />}>
             <Outlet />

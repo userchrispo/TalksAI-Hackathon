@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { 
   Storefront, User, ArrowRight, ArrowLeft, CheckCircle, 
@@ -98,12 +98,30 @@ const FormInput = ({ label, icon: Icon, ...props }) => (
 
 const TOTAL_STEPS = 5;
 
+function buildRegistrationData(regState) {
+  return {
+    shopName: regState.shopName || '',
+    ownerName: regState.ownerName || '',
+    email: regState.email || '',
+    phone: '', address: '',
+    employees: '', yearsInBusiness: '',
+    monthlyRevenue: '', rent: '', payroll: '', supplies: '', insurance: '',
+    trackingMethod: 'nothing', safeMin: '$5,000',
+  };
+}
+
 export const Onboarding = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { completeOnboarding } = useAppContext();
+  const regState = location.state;
+  const isRegistering = regState?.fromRegister === true;
+
   const [step, setStep] = useState(0);
   const [selectedType, setSelectedType] = useState('auto');
-  const [formData, setFormData] = useState(prefillData.auto);
+  const [formData, setFormData] = useState(
+    isRegistering ? buildRegistrationData(regState) : prefillData.auto,
+  );
   const [isProcessing, setIsProcessing] = useState(false);
   const [direction, setDirection] = useState(1);
   const [bankConnecting, setBankConnecting] = useState(false);
@@ -302,14 +320,14 @@ export const Onboarding = () => {
               <motion.div key="s3" custom={direction} variants={slideVariants} initial="enter" animate="center" exit="exit" transition={spring} className="w-full">
                 <div className="text-center mb-10">
                   <h1 className="text-3xl md:text-4xl font-medium tracking-tighter text-zinc-950 mb-3">Connect your bank</h1>
-                  <p className="text-zinc-500 text-[15px] max-w-md mx-auto">Securely link your business checking account so the AI can analyze real transactions.</p>
+                  <p className="text-zinc-500 text-[15px] max-w-md mx-auto">Securely link your business checking account via Plaid so the AI can analyze real transactions.</p>
                 </div>
                 <div className="bg-white border border-zinc-200 rounded-[2rem] p-8 md:p-10 shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
                   {!bankConnected ? (
                     <>
                       <div className="flex items-center gap-3 mb-6 px-1">
                         <ShieldCheck size={18} weight="fill" className="text-zinc-400" />
-                        <span className="text-[13px] text-zinc-500 font-medium">256-bit encrypted. Read-only access. We never store credentials.</span>
+                        <span className="text-[13px] text-zinc-500 font-medium">Connected via Plaid. 256-bit encrypted. Read-only access. We never store credentials.</span>
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                         {banks.map(bank => (
@@ -334,7 +352,7 @@ export const Onboarding = () => {
                             <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
                               <SpinnerGap size={20} weight="bold" className="text-zinc-500" />
                             </motion.div>
-                            <span className="text-sm text-zinc-600 font-medium">Connecting securely...</span>
+                            <span className="text-sm text-zinc-600 font-medium">Connecting securely via Plaid...</span>
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -361,7 +379,7 @@ export const Onboarding = () => {
                         <CheckCircle size={32} weight="fill" className="text-zinc-900" />
                       </motion.div>
                       <h3 className="text-xl font-medium text-zinc-950 mb-2">
-                        {selectedBankName} {connectionSource === 'bank' ? 'connected' : 'loaded'}
+                        {selectedBankName} {connectionSource === 'bank' ? 'connected via Plaid' : 'loaded'}
                       </h3>
                       <p className="text-zinc-500 text-[14px]">
                         {connectionSource === 'bank'
@@ -453,15 +471,25 @@ export const Onboarding = () => {
         </div>
 
         {!isProcessing && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="flex items-center justify-between mt-8">
-            <button onClick={step > 0 ? handleBack : () => navigate('/')}
-              className="flex items-center gap-2 text-sm font-medium text-zinc-500 hover:text-zinc-900 transition-colors"
-            >
-              <ArrowLeft size={16} weight="bold" /> {step > 0 ? 'Back' : 'Home'}
-            </button>
-            <Button magnetic variant="primary" className="h-[52px] px-8 text-[15px] shadow-[0_8px_24px_rgba(0,0,0,0.12)]" onClick={handleNext}>
-              {step === TOTAL_STEPS - 1 ? 'Launch Dashboard' : 'Continue'} <ArrowRight size={16} weight="bold" className="ml-2" />
-            </Button>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="flex flex-col gap-4 mt-8">
+            <div className="flex items-center justify-between">
+              <button onClick={step > 0 ? handleBack : () => navigate(isRegistering ? '/' : '/auth')}
+                className="flex items-center gap-2 text-sm font-medium text-zinc-500 hover:text-zinc-900 transition-colors"
+              >
+                <ArrowLeft size={16} weight="bold" /> {step > 0 ? 'Back' : isRegistering ? 'Back to home' : 'Back to login'}
+              </button>
+              <Button magnetic variant="primary" className="h-[52px] px-8 text-[15px] shadow-[0_8px_24px_rgba(0,0,0,0.12)]" onClick={handleNext}>
+                {step === TOTAL_STEPS - 1 ? 'Launch Dashboard' : 'Continue'} <ArrowRight size={16} weight="bold" className="ml-2" />
+              </Button>
+            </div>
+            {step === 0 && !isRegistering && (
+              <p className="text-center text-sm text-zinc-400">
+                Want your own workspace?{' '}
+                <button type="button" onClick={() => navigate('/auth')} className="text-zinc-600 font-medium hover:text-zinc-900 transition-colors">
+                  Sign up instead
+                </button>
+              </p>
+            )}
           </motion.div>
         )}
       </div>

@@ -170,19 +170,15 @@ export const Landing = () => {
               <Link to="/auth">
                 <Button magnetic variant="primary" className="h-[52px] px-8 text-[15px] shadow-[0_8px_24px_rgba(0,0,0,0.12)]">Start free trial</Button>
               </Link>
-              <Link to="/app/dashboard">
+              <Link to="/demo">
                 <Button magnetic variant="outline" className="h-[52px] px-8 text-[15px]">View live demo</Button>
               </Link>
             </motion.div>
 
-            {/* Social proof strip */}
-            <motion.div variants={fadeIn} className="flex items-center gap-4 mt-14 pt-8 border-t border-zinc-200 w-full">
-              <div className="flex -space-x-2">
-                {[42, 73, 18, 91].map(seed => (
-                  <img key={seed} src={`https://picsum.photos/seed/user${seed}/80/80`} alt="" className="w-8 h-8 rounded-full border-2 border-white object-cover" />
-                ))}
-              </div>
-              <p className="text-sm text-zinc-500 font-medium">Trusted by <span className="text-zinc-900">200+</span> shop owners</p>
+            {/* Hackathon badge */}
+            <motion.div variants={fadeIn} className="flex items-center gap-3 mt-14 pt-8 border-t border-zinc-200 w-full">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <p className="text-sm text-zinc-500 font-medium">Built during the <span className="text-zinc-900 font-semibold">Tribe Black Youth AI Hackathon 2026</span></p>
             </motion.div>
           </motion.div>
 
