@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
@@ -98,6 +98,132 @@ const FormInput = ({ label, icon: Icon, ...props }) => (
 
 const TOTAL_STEPS = 5;
 
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    const nextCharacter = text[index + 1];
+
+    if (character === '"') {
+      if (inQuotes && nextCharacter === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (character === ',' && !inQuotes) {
+      row.push(current);
+      current = '';
+      continue;
+    }
+
+    if (character === '\n' && !inQuotes) {
+      row.push(current);
+      if (row.some((cell) => String(cell ?? '').trim().length > 0)) {
+        rows.push(row);
+      }
+      row = [];
+      current = '';
+      continue;
+    }
+
+    if (character !== '\r') {
+      current += character;
+    }
+  }
+
+  row.push(current);
+  if (row.some((cell) => String(cell ?? '').trim().length > 0)) {
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function findColumnIndex(headers, patterns) {
+  return headers.findIndex((header) => patterns.some((pattern) => header.includes(pattern)));
+}
+
+function parseCsvDate(rawValue) {
+  const value = String(rawValue ?? '').trim();
+  if (!value) {
+    return null;
+  }
+
+  const directDate = new Date(value);
+  if (!Number.isNaN(directDate.getTime())) {
+    return directDate;
+  }
+
+  const parts = value.match(/^(\d{1,4})[/-](\d{1,2})[/-](\d{1,4})$/);
+  if (!parts) {
+    return null;
+  }
+
+  const [, first, second, third] = parts;
+  const firstNumber = Number(first);
+  const secondNumber = Number(second);
+  const thirdNumber = Number(third);
+
+  if (first.length === 4) {
+    const isoDate = new Date(firstNumber, secondNumber - 1, thirdNumber);
+    return Number.isNaN(isoDate.getTime()) ? null : isoDate;
+  }
+
+  const normalizedYear = third.length === 2 ? 2000 + thirdNumber : thirdNumber;
+  const monthFirstDate = new Date(normalizedYear, firstNumber - 1, secondNumber);
+  return Number.isNaN(monthFirstDate.getTime()) ? null : monthFirstDate;
+}
+
+function summarizeCsvUpload(fileName, text) {
+  const rows = parseCsvRows(text);
+
+  if (rows.length < 2) {
+    throw new Error('Upload a CSV with a header row and at least one transaction.');
+  }
+
+  const headers = rows[0].map((cell) => String(cell ?? '').trim().toLowerCase());
+  const records = rows.slice(1).filter((row) => row.some((cell) => String(cell ?? '').trim().length > 0));
+
+  if (!records.length) {
+    throw new Error('We could not find any transaction rows in that CSV.');
+  }
+
+  const descriptionIndex = findColumnIndex(headers, ['description', 'merchant', 'vendor', 'payee', 'name', 'memo', 'details']);
+  const dateIndex = findColumnIndex(headers, ['date', 'posted', 'created', 'time']);
+  const fallbackVendorIndex = descriptionIndex >= 0 ? descriptionIndex : Math.min(1, Math.max(records[0].length - 1, 0));
+  const fallbackDateIndex = dateIndex >= 0 ? dateIndex : 0;
+
+  const vendors = new Set();
+  const months = new Set();
+
+  records.forEach((row) => {
+    const vendorValue = String(row[fallbackVendorIndex] ?? '').trim();
+    if (vendorValue) {
+      vendors.add(vendorValue.toLowerCase());
+    }
+
+    const parsedDate = parseCsvDate(row[fallbackDateIndex]);
+    if (parsedDate) {
+      months.add(`${parsedDate.getFullYear()}-${parsedDate.getMonth()}`);
+    }
+  });
+
+  return {
+    fileName,
+    transactionCount: records.length,
+    vendorCount: Math.max(vendors.size, 1),
+    monthCount: Math.max(months.size, 1),
+  };
+}
+
 function buildRegistrationData(regState) {
   return {
     shopName: regState.shopName || '',
@@ -110,36 +236,112 @@ function buildRegistrationData(regState) {
   };
 }
 
+function createInitialFormData(isDemoExperience, regState, typeId = 'auto') {
+  if (isDemoExperience) {
+    return prefillData[typeId] || prefillData.auto;
+  }
+
+  return buildRegistrationData(regState ?? {});
+}
+
+function hasValue(value) {
+  return String(value ?? '').trim().length > 0;
+}
+
+function hasNumericValue(value) {
+  return /[0-9]/.test(String(value ?? ''));
+}
+
+function validateSetupStep(step, formData, bankConnected) {
+  if (step === 1) {
+    const requiredFields = [
+      formData.shopName,
+      formData.ownerName,
+      formData.email,
+      formData.phone,
+      formData.address,
+      formData.employees,
+      formData.yearsInBusiness,
+    ];
+
+    if (requiredFields.some((field) => !hasValue(field))) {
+      return 'Fill in the core business details before continuing.';
+    }
+  }
+
+  if (step === 2) {
+    const financialFields = [
+      formData.monthlyRevenue,
+      formData.rent,
+      formData.payroll,
+      formData.supplies,
+      formData.insurance,
+    ];
+
+    if (financialFields.some((field) => !hasNumericValue(field))) {
+      return 'Add your monthly revenue and core expenses before continuing.';
+    }
+  }
+
+  if (step === 3 && !bankConnected) {
+    return 'Upload your transaction CSV before continuing.';
+  }
+
+  return '';
+}
+
 export const Onboarding = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { completeOnboarding } = useAppContext();
   const regState = location.state;
-  const isRegistering = regState?.fromRegister === true;
+  const isDemoExperience = location.pathname === '/demo';
+  const exitPath = isDemoExperience ? '/' : '/auth';
+  const exitLabel = isDemoExperience ? 'Back to home' : 'Back to login';
 
   const [step, setStep] = useState(0);
   const [selectedType, setSelectedType] = useState('auto');
-  const [formData, setFormData] = useState(
-    isRegistering ? buildRegistrationData(regState) : prefillData.auto,
-  );
+  const [formData, setFormData] = useState(() => createInitialFormData(isDemoExperience, regState));
   const [isProcessing, setIsProcessing] = useState(false);
   const [direction, setDirection] = useState(1);
   const [bankConnecting, setBankConnecting] = useState(false);
   const [bankConnected, setBankConnected] = useState(false);
   const [selectedBankName, setSelectedBankName] = useState('TD Canada Trust');
   const [connectionSource, setConnectionSource] = useState('bank');
+  const [csvImport, setCsvImport] = useState(null);
+  const [csvUploading, setCsvUploading] = useState(false);
+  const [stepError, setStepError] = useState('');
+  const fileInputRef = useRef(null);
 
   const handleTypeSelect = (typeId) => {
     setSelectedType(typeId);
-    setFormData(prefillData[typeId]);
+    setFormData(createInitialFormData(isDemoExperience, regState, typeId));
     setBankConnected(false);
     setSelectedBankName('TD Canada Trust');
     setConnectionSource('bank');
+    setCsvImport(null);
+    setCsvUploading(false);
+    setStepError('');
   };
 
-  const update = (key, val) => setFormData(prev => ({ ...prev, [key]: val }));
+  const update = (key, val) => {
+    setFormData(prev => ({ ...prev, [key]: val }));
+    if (stepError) {
+      setStepError('');
+    }
+  };
 
   const handleNext = () => {
+    if (!isDemoExperience) {
+      const validationMessage = validateSetupStep(step, formData, bankConnected);
+
+      if (validationMessage) {
+        setStepError(validationMessage);
+        return;
+      }
+
+      setStepError('');
+    }
     setDirection(1);
     if (step === TOTAL_STEPS - 1) {
       setIsProcessing(true);
@@ -149,6 +351,8 @@ export const Onboarding = () => {
           formData,
           bankName: selectedBankName,
           bankSource: connectionSource,
+          connectionMeta: connectionSource === 'csv' ? csvImport : null,
+          accessMode: isDemoExperience ? 'demo' : 'auth',
         });
         navigate('/app/dashboard');
       }, 1800);
@@ -159,6 +363,7 @@ export const Onboarding = () => {
 
   const handleBack = () => {
     setDirection(-1);
+    setStepError('');
     setStep(s => s - 1);
   };
 
@@ -166,10 +371,55 @@ export const Onboarding = () => {
     setBankConnecting(true);
     setSelectedBankName(bankName);
     setConnectionSource('bank');
+    setCsvImport(null);
+    setStepError('');
     window.setTimeout(() => {
       setBankConnecting(false);
       setBankConnected(true);
     }, 1500);
+  };
+
+  const handleCsvUpload = async (file) => {
+    if (!file) {
+      return;
+    }
+
+    const lowerName = file.name.toLowerCase();
+    const looksLikeCsv = lowerName.endsWith('.csv') || file.type.includes('csv');
+
+    if (!looksLikeCsv) {
+      setBankConnected(false);
+      setCsvImport(null);
+      setStepError('Upload a CSV file exported from your bank or accounting tool.');
+      return;
+    }
+
+    setCsvUploading(true);
+    setStepError('');
+
+    try {
+      const text = await file.text();
+      const summary = summarizeCsvUpload(file.name, text);
+
+      setSelectedBankName(file.name);
+      setConnectionSource('csv');
+      setCsvImport(summary);
+      setBankConnected(true);
+    } catch (error) {
+      setBankConnected(false);
+      setCsvImport(null);
+      setSelectedBankName('CSV Upload');
+      setConnectionSource('csv');
+      setStepError(error instanceof Error ? error.message : 'We could not read that CSV file.');
+    } finally {
+      setCsvUploading(false);
+    }
+  };
+
+  const handleCsvSelection = async (event) => {
+    const file = event.target.files?.[0];
+    await handleCsvUpload(file);
+    event.target.value = '';
   };
 
   const slideVariants = {
@@ -319,11 +569,17 @@ export const Onboarding = () => {
             {step === 3 && !isProcessing && (
               <motion.div key="s3" custom={direction} variants={slideVariants} initial="enter" animate="center" exit="exit" transition={spring} className="w-full">
                 <div className="text-center mb-10">
-                  <h1 className="text-3xl md:text-4xl font-medium tracking-tighter text-zinc-950 mb-3">Connect your bank</h1>
-                  <p className="text-zinc-500 text-[15px] max-w-md mx-auto">Securely link your business checking account via Plaid so the AI can analyze real transactions.</p>
+                  <h1 className="text-3xl md:text-4xl font-medium tracking-tighter text-zinc-950 mb-3">
+                    {isDemoExperience ? 'Connect your bank' : 'Upload your transaction CSV'}
+                  </h1>
+                  <p className="text-zinc-500 text-[15px] max-w-md mx-auto">
+                    {isDemoExperience
+                      ? 'Securely link your business checking account via Plaid so the AI can analyze real transactions.'
+                      : 'For real accounts, upload a CSV export from your bank or accounting tool. We use that file instead of sample data.'}
+                  </p>
                 </div>
                 <div className="bg-white border border-zinc-200 rounded-[2rem] p-8 md:p-10 shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
-                  {!bankConnected ? (
+                  {isDemoExperience ? (!bankConnected ? (
                     <>
                       <div className="flex items-center gap-3 mb-6 px-1">
                         <ShieldCheck size={18} weight="fill" className="text-zinc-400" />
@@ -403,6 +659,96 @@ export const Onboarding = () => {
                         </div>
                       </div>
                     </motion.div>
+                  )) : (
+                    <>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".csv,text/csv"
+                        className="hidden"
+                        onChange={handleCsvSelection}
+                      />
+
+                      {!bankConnected ? (
+                        <div className="rounded-[1.75rem] border border-dashed border-zinc-300 bg-zinc-50/70 p-8 md:p-10 text-center">
+                          <div className="w-16 h-16 bg-white border border-zinc-200 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-sm">
+                            <Receipt size={30} weight="duotone" className="text-zinc-700" />
+                          </div>
+                          <h3 className="text-xl font-medium text-zinc-950 mb-3">Bring in your real transaction history</h3>
+                          <p className="text-zinc-500 text-[14px] leading-relaxed max-w-lg mx-auto mb-8">
+                            Upload a `.csv` export from your bank, Wave, QuickBooks, or bookkeeping tool. This setup flow no longer uses sample CSV data for signed-in accounts.
+                          </p>
+                          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                            <Button
+                              type="button"
+                              variant="primary"
+                              className="px-6"
+                              onClick={() => fileInputRef.current?.click()}
+                            >
+                              Choose CSV file
+                            </Button>
+                            <span className="text-sm text-zinc-400 font-medium">Accepted: bank exports, bookkeeping exports, transaction ledgers</span>
+                          </div>
+                          <div className="mt-8 rounded-2xl border border-zinc-200 bg-white px-5 py-4 text-left">
+                            <p className="text-xs font-semibold tracking-widest text-zinc-400 uppercase mb-2">What we look for</p>
+                            <p className="text-sm text-zinc-600 leading-relaxed">
+                              A standard transaction CSV with rows for dates, descriptions or merchants, and amounts. We will summarize the file locally for onboarding and use it to seed your workspace.
+                            </p>
+                          </div>
+
+                          <AnimatePresence>
+                            {csvUploading ? (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="mt-6 flex items-center justify-center gap-3 py-2"
+                              >
+                                <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
+                                  <SpinnerGap size={20} weight="bold" className="text-zinc-500" />
+                                </motion.div>
+                                <span className="text-sm text-zinc-600 font-medium">Reading your CSV and building a summary...</span>
+                              </motion.div>
+                            ) : null}
+                          </AnimatePresence>
+                        </div>
+                      ) : (
+                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={spring} className="text-center py-8">
+                          <motion.div
+                            initial={{ scale: 0 }} animate={{ scale: 1 }}
+                            transition={{ type: "spring", stiffness: 200, damping: 15 }}
+                            className="w-16 h-16 bg-zinc-50 border border-zinc-200 rounded-2xl flex items-center justify-center mx-auto mb-6"
+                          >
+                            <CheckCircle size={32} weight="fill" className="text-zinc-900" />
+                          </motion.div>
+                          <h3 className="text-xl font-medium text-zinc-950 mb-2">Transaction CSV loaded</h3>
+                          <p className="text-zinc-500 text-[14px]">{csvImport?.fileName || selectedBankName} imported successfully for this workspace.</p>
+                          <div className="mt-6 flex items-center justify-center gap-6 text-sm">
+                            <div className="text-center">
+                              <div className="font-mono font-semibold text-zinc-900 text-lg">{csvImport?.transactionCount || 0}</div>
+                              <div className="text-zinc-400 text-xs font-medium uppercase tracking-widest">Transactions</div>
+                            </div>
+                            <div className="w-px h-8 bg-zinc-200" />
+                            <div className="text-center">
+                              <div className="font-mono font-semibold text-zinc-900 text-lg">{csvImport?.monthCount || 0}</div>
+                              <div className="text-zinc-400 text-xs font-medium uppercase tracking-widest">Months</div>
+                            </div>
+                            <div className="w-px h-8 bg-zinc-200" />
+                            <div className="text-center">
+                              <div className="font-mono font-semibold text-zinc-900 text-lg">{csvImport?.vendorCount || 0}</div>
+                              <div className="text-zinc-400 text-xs font-medium uppercase tracking-widest">Vendors</div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="mt-6 text-sm text-zinc-500 hover:text-zinc-900 font-medium transition-colors"
+                          >
+                            Replace CSV file
+                          </button>
+                        </motion.div>
+                      )}
+                    </>
                   )}
                 </div>
               </motion.div>
@@ -472,17 +818,20 @@ export const Onboarding = () => {
 
         {!isProcessing && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="flex flex-col gap-4 mt-8">
+            {stepError ? (
+              <p className="text-center text-sm font-medium text-red-600">{stepError}</p>
+            ) : null}
             <div className="flex items-center justify-between">
-              <button onClick={step > 0 ? handleBack : () => navigate(isRegistering ? '/' : '/auth')}
+              <button onClick={step > 0 ? handleBack : () => navigate(exitPath)}
                 className="flex items-center gap-2 text-sm font-medium text-zinc-500 hover:text-zinc-900 transition-colors"
               >
-                <ArrowLeft size={16} weight="bold" /> {step > 0 ? 'Back' : isRegistering ? 'Back to home' : 'Back to login'}
+                <ArrowLeft size={16} weight="bold" /> {step > 0 ? 'Back' : exitLabel}
               </button>
               <Button magnetic variant="primary" className="h-[52px] px-8 text-[15px] shadow-[0_8px_24px_rgba(0,0,0,0.12)]" onClick={handleNext}>
                 {step === TOTAL_STEPS - 1 ? 'Launch Dashboard' : 'Continue'} <ArrowRight size={16} weight="bold" className="ml-2" />
               </Button>
             </div>
-            {step === 0 && !isRegistering && (
+            {step === 0 && isDemoExperience && (
               <p className="text-center text-sm text-zinc-400">
                 Want your own workspace?{' '}
                 <button type="button" onClick={() => navigate('/auth')} className="text-zinc-600 font-medium hover:text-zinc-900 transition-colors">

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AppStateContext } from './appState';
+import { getAccessModeFlags } from '../lib/aiAccess';
+import { buildScenarioFromAction } from '../lib/scenarioPresets';
 
 const STORAGE_KEY = 'talks-ai-demo-state';
 const DEFAULT_START_MONTH = 'August 2026';
@@ -26,7 +28,10 @@ const defaultBankConnection = {
   connected: true,
   name: 'TD Canada Trust Business',
   source: 'bank',
+  isSimulated: false,
   lastSynced: '14 mins ago',
+  fileName: null,
+  stats: null,
 };
 
 const defaultProblems = [
@@ -45,7 +50,7 @@ const defaultProblems = [
     severity: 'high',
     title: 'Invoice #1042 ($3,000) due tomorrow, usually 14 days late.',
     desc: "Smith Auto Group frequently pays late. If delayed, next week's vendor payments will be tight.",
-    action: 'Send reminder email',
+    action: 'Ask AI for fix',
     badge: 'outline',
   },
   {
@@ -54,7 +59,7 @@ const defaultProblems = [
     severity: 'medium',
     title: 'Supplier raised brake pad prices by 8%.',
     desc: "Parts vendor 'BremTech' increased average unit cost over the last 3 orders. Current margins dropping.",
-    action: 'Adjust pricing guidance',
+    action: 'Ask AI for fix',
     badge: 'outline',
   },
 ];
@@ -75,6 +80,13 @@ const defaultScenario = {
   startMonth: DEFAULT_START_MONTH,
   source: 'baseline',
   updatedAt: null,
+};
+
+const defaultFixHistory = [];
+
+const defaultSession = {
+  hasWorkspaceAccess: false,
+  accessMode: null,
 };
 
 const scenarioMonthOptions = [
@@ -142,6 +154,8 @@ function severityWeight(severity) {
 
 function createDefaultState() {
   return {
+    session: defaultSession,
+    fixHistory: defaultFixHistory,
     profile: defaultProfile,
     bankConnection: defaultBankConnection,
     problems: defaultProblems,
@@ -152,17 +166,29 @@ function createDefaultState() {
 
 function mergeState(rawState) {
   const defaults = createDefaultState();
+  const nextSession = {
+    ...defaults.session,
+    ...(rawState?.session ?? {}),
+  };
+  const rawBankConnection = rawState?.bankConnection ?? {};
+  const nextIsSimulated =
+    typeof rawBankConnection.isSimulated === 'boolean'
+      ? rawBankConnection.isSimulated
+      : nextSession.accessMode === 'demo';
 
   return {
     ...defaults,
     ...rawState,
+    session: nextSession,
+    fixHistory: Array.isArray(rawState?.fixHistory) ? rawState.fixHistory : defaults.fixHistory,
     profile: {
       ...defaults.profile,
       ...(rawState?.profile ?? {}),
     },
     bankConnection: {
       ...defaults.bankConnection,
-      ...(rawState?.bankConnection ?? {}),
+      ...rawBankConnection,
+      isSimulated: nextIsSimulated,
     },
     balance: {
       ...defaults.balance,
@@ -193,7 +219,7 @@ function readStoredState() {
   }
 }
 
-function buildFinancialModel({ profile, balance, problems, scenario, bankConnection }) {
+function buildFinancialModel({ profile, balance, problems, scenario, bankConnection, accessMode }) {
   const monthlyRevenue = parseCurrency(profile.monthlyRevenue, 28400);
   const rent = parseCurrency(profile.rent, 3200);
   const payroll = parseCurrency(profile.payroll, 12800);
@@ -325,6 +351,9 @@ function buildFinancialModel({ profile, balance, problems, scenario, bankConnect
   const supplierProblem = problems.find((problem) => problem.category === 'Rising Costs');
   const cashCrunchProblem = problems.find((problem) => problem.category === 'Cash Crunch');
   const scenarioIsActive = Math.abs(scenarioImpact) >= 100;
+  const isSimulatedData = bankConnection.isSimulated || accessMode === 'demo';
+  const isDemoCsv = isSimulatedData && bankConnection.source !== 'bank';
+  const csvSourceLabel = bankConnection.fileName || bankConnection.name || (isSimulatedData ? 'Sample CSV dataset' : 'Your uploaded CSV');
 
   const recommendationGroups = [
     {
@@ -355,16 +384,24 @@ function buildFinancialModel({ profile, balance, problems, scenario, bankConnect
             },
         {
           id: 'bank-source',
-          tone: bankConnection.source === 'bank' ? 'positive' : 'neutral',
+          tone: !isSimulatedData && bankConnection.source === 'bank' ? 'positive' : 'neutral',
           href: '/app/settings',
           title:
-            bankConnection.source === 'bank'
+            isSimulatedData && bankConnection.source === 'bank'
+              ? `${bankConnection.name} sample feed is loaded for the walkthrough.`
+              : isDemoCsv
+                ? `${csvSourceLabel} is powering the demo forecast right now.`
+                : bankConnection.source === 'bank'
               ? `${bankConnection.name} is synced, so the runway view is using live bank context.`
-              : 'You are running the CSV demo model right now. Switch back to a bank feed when you want live sync language.',
+                : `${csvSourceLabel} is currently powering the shared forecast.`,
           detail:
-            bankConnection.source === 'bank'
+            isSimulatedData && bankConnection.source === 'bank'
+              ? 'This is curated sample data for the demo, so every screen stays consistent without a real bank login.'
+              : isDemoCsv
+                ? 'This sample transaction history is bundled for the demo and keeps the product story self-contained.'
+                : bankConnection.source === 'bank'
               ? 'Use the dashboard and simulator as your live operating view for the next 30 days.'
-              : 'The forecast is still coherent, but judges will trust it more when the bank connection looks live.',
+                : 'The forecast is using your uploaded transaction history until you connect a live bank feed.',
         },
       ],
     },
@@ -539,10 +576,24 @@ function resolveProblemState(current, id) {
   };
 }
 
+function createFixHistoryEntry(entry = {}) {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    title: entry.title || 'Fix applied',
+    detail: entry.detail || 'A fix was applied to the shared forecast.',
+    impact: entry.impact || null,
+    problemId: entry.problemId || null,
+    actionId: entry.actionId || null,
+    source: entry.source || 'app',
+    appliedAt: new Date().toISOString(),
+  };
+}
+
 export function AppProvider({ children }) {
   const [appState, setAppState] = useState(readStoredState);
-  const { profile, bankConnection, problems, balance, scenario } = appState;
+  const { session, fixHistory, profile, bankConnection, problems, balance, scenario } = appState;
   const [toasts, setToasts] = useState([]);
+  const accessFlags = getAccessModeFlags(session.accessMode);
 
   const { financialMetrics, dashboardTrajectory, simulatorTrajectory, recommendationGroups, priorityActions } =
     buildFinancialModel({
@@ -551,6 +602,7 @@ export function AppProvider({ children }) {
       balance,
       problems,
       scenario,
+      accessMode: accessFlags.accessMode,
     });
 
   const derivedBalance = {
@@ -574,6 +626,13 @@ export function AppProvider({ children }) {
 
   const removeToast = (id) => {
     setToasts((currentToasts) => currentToasts.filter((toast) => toast.id !== id));
+  };
+
+  const recordFixApplied = (entry) => {
+    setAppState((current) => ({
+      ...current,
+      fixHistory: [createFixHistoryEntry(entry), ...current.fixHistory].slice(0, 12),
+    }));
   };
 
   const updateProfile = (updates, options = {}) => {
@@ -613,9 +672,14 @@ export function AppProvider({ children }) {
     addToast(message);
   };
 
-  const completeOnboarding = ({ businessType, formData, bankName, bankSource }) => {
+  const completeOnboarding = ({ businessType, formData, bankName, bankSource, connectionMeta = null, accessMode = 'demo' }) => {
+    const isSimulated = accessMode === 'demo';
     setAppState((current) => ({
       ...current,
+      session: {
+        hasWorkspaceAccess: true,
+        accessMode,
+      },
       profile: {
         ...current.profile,
         ...formData,
@@ -623,9 +687,23 @@ export function AppProvider({ children }) {
       },
       bankConnection: {
         connected: true,
-        name: bankName || 'CSV Upload',
+        name: bankName || connectionMeta?.fileName || 'CSV Upload',
         source: bankSource || 'csv',
-        lastSynced: bankSource === 'bank' ? 'Just now' : 'CSV imported',
+        isSimulated,
+        lastSynced:
+          accessMode === 'demo'
+            ? 'Demo data loaded just now'
+            : bankSource === 'bank'
+              ? 'Just now'
+              : 'CSV uploaded just now',
+        fileName: connectionMeta?.fileName || null,
+        stats: connectionMeta
+          ? {
+              transactionCount: connectionMeta.transactionCount ?? 0,
+              monthCount: connectionMeta.monthCount ?? 0,
+              vendorCount: connectionMeta.vendorCount ?? 0,
+            }
+          : null,
       },
       scenario: defaultScenario,
     }));
@@ -710,9 +788,22 @@ export function AppProvider({ children }) {
     );
   };
 
-  const takeAction = (actionId) => {
+  const takeAction = (actionId, options = {}) => {
     if (actionId === 'collect-late-invoice') {
       const didResolve = resolveProblem(2, 'Reminder sent and the late payer risk is cleared.');
+
+      if (didResolve) {
+        recordFixApplied({
+          actionId,
+          problemId: 2,
+          source: options.source || 'app',
+          title: options.title || 'Late payer fix applied',
+          detail:
+            options.detail
+            || 'Marked the reminder sent so the overdue $3,000 invoice is treated as the next cash recovery move.',
+          impact: options.impact || '+$3,000 cash recovery',
+        });
+      }
 
       if (!didResolve) {
         addToast('The late payer risk is already cleared.', 'warning');
@@ -724,6 +815,19 @@ export function AppProvider({ children }) {
     if (actionId === 'defer-overlap-bills') {
       const didResolve = resolveProblem(1, 'Payment plan applied and the tax overlap risk is reduced.');
 
+      if (didResolve) {
+        recordFixApplied({
+          actionId,
+          problemId: 1,
+          source: options.source || 'app',
+          title: options.title || 'Cash crunch fix applied',
+          detail:
+            options.detail
+            || 'Applied the payment plan so the tax and rent overlap stops squeezing the same week of cash flow.',
+          impact: options.impact || '+$900 near-term buffer',
+        });
+      }
+
       if (!didResolve) {
         addToast('The cash crunch plan is already applied.', 'warning');
       }
@@ -734,6 +838,19 @@ export function AppProvider({ children }) {
     if (actionId === 'update-pricing') {
       const didResolve = resolveProblem(3, 'Pricing guidance applied across the forecast.');
 
+      if (didResolve) {
+        recordFixApplied({
+          actionId,
+          problemId: 3,
+          source: options.source || 'app',
+          title: options.title || 'Margin repair fix applied',
+          detail:
+            options.detail
+            || 'Applied the pricing update so the supplier increase is recovered inside the shared forecast.',
+          impact: options.impact || '+$650 / month',
+        });
+      }
+
       if (!didResolve) {
         addToast('Pricing guidance is already reflected in the forecast.', 'warning');
       }
@@ -741,43 +858,9 @@ export function AppProvider({ children }) {
       return didResolve;
     }
 
-    if (actionId === 'simulate-hire') {
-      applyScenario({
-        label: 'New technician - part-time ramp',
-        summary: 'Adds staffing cost first, then lets revenue catch up over the following cycle.',
-        monthlyImpact: 3200,
-        source: 'action',
-      });
-      return true;
-    }
-
-    if (actionId === 'simulate-revenue-dip') {
-      applyScenario({
-        label: 'Revenue dip - 20%',
-        summary: 'Stress test for a softer month where a major customer slows or collections slip.',
-        monthlyImpact: 5600,
-        source: 'action',
-      });
-      return true;
-    }
-
-    if (actionId === 'simulate-revenue-lift') {
-      applyScenario({
-        label: 'Price increase - 10%',
-        summary: 'Higher average ticket size improves monthly cash contribution without adding fixed cost.',
-        monthlyImpact: -2800,
-        source: 'action',
-      });
-      return true;
-    }
-
-    if (actionId === 'stabilize-cash') {
-      applyScenario({
-        label: 'Collections sprint + spend freeze',
-        summary: 'Pulls in receivables faster and trims small discretionary costs to protect the safety floor.',
-        monthlyImpact: -1200,
-        source: 'action',
-      });
+    const scenarioPreset = buildScenarioFromAction(actionId, { source: 'action' });
+    if (scenarioPreset) {
+      applyScenario(scenarioPreset);
       return true;
     }
 
@@ -796,6 +879,12 @@ export function AppProvider({ children }) {
   };
 
   const value = {
+    session,
+    accessMode: accessFlags.accessMode,
+    hasWorkspaceAccess: session.hasWorkspaceAccess,
+    isDemoMode: accessFlags.isDemoMode,
+    hasFullAiAccess: accessFlags.hasFullAiAccess,
+    fixHistory,
     profile,
     bankConnection,
     problems,

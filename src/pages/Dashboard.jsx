@@ -7,6 +7,8 @@ import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { useAppContext } from '../context/useAppContext';
+import { APP_ROUTES } from '../lib/appRoutes';
+import { buildScenarioFromAction } from '../lib/scenarioPresets';
 
 void motion;
 
@@ -58,9 +60,32 @@ export const Dashboard = () => {
     }
 
     if (action.href) {
+      const scenarioPreset = action.actionId && action.href === APP_ROUTES.simulator
+        ? buildScenarioFromAction(action.actionId, { source: 'action' })
+        : null;
+
+      if (scenarioPreset) {
+        navigate(action.href, {
+          state: {
+            simulatorActionId: action.actionId,
+            simulatorQuestion: scenarioPreset.question,
+            from: 'dashboard',
+          },
+        });
+        return;
+      }
+
       navigate(action.href);
     }
   };
+
+  const bankConnectionLabel = bankConnection.isSimulated
+    ? bankConnection.source === 'bank'
+      ? 'Sample Feed'
+      : 'Sample CSV'
+    : bankConnection.source === 'bank'
+      ? 'Verified'
+      : 'CSV Upload';
 
   return (
     <motion.div
@@ -124,6 +149,21 @@ export const Dashboard = () => {
                         }
 
                         if (item.href) {
+                          const scenarioPreset = item.actionId && item.href === APP_ROUTES.simulator
+                            ? buildScenarioFromAction(item.actionId, { source: 'action' })
+                            : null;
+
+                          if (scenarioPreset) {
+                            navigate(item.href, {
+                              state: {
+                                simulatorActionId: item.actionId,
+                                simulatorQuestion: scenarioPreset.question,
+                                from: 'dashboard',
+                              },
+                            });
+                            return;
+                          }
+
                           navigate(item.href);
                         }
                       }}
@@ -152,7 +192,9 @@ export const Dashboard = () => {
           <Card className="flex flex-col justify-between group">
             <div className="flex justify-between items-start mb-12">
               <span className="text-zinc-500 font-medium tracking-tight">Safe to Spend Today</span>
-              <Badge variant="neutral">{bankConnection.source === 'bank' ? 'Verified' : 'CSV Demo'}</Badge>
+              <Badge variant="neutral">
+                {bankConnectionLabel}
+              </Badge>
             </div>
             <div>
               <motion.h2
@@ -179,7 +221,9 @@ export const Dashboard = () => {
           <Card className="p-6 bg-white">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-lg font-medium tracking-tight text-zinc-950">Best next actions</h3>
-              <span className="text-xs uppercase tracking-widest font-semibold text-zinc-400">Live</span>
+              <span className="text-xs uppercase tracking-widest font-semibold text-zinc-400">
+                {bankConnection.isSimulated ? 'Demo' : 'Live'}
+              </span>
             </div>
             <div className="flex flex-col gap-4">
               {priorityActions.map((action) => (

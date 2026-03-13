@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
+import { APP_ROUTES } from '../lib/appRoutes';
 import {
   EnvelopeSimple, Lock, Storefront, User, ArrowRight,
   Eye, EyeSlash, Lightning, ShieldCheck, ChartLineUp, Warning
 } from '@phosphor-icons/react';
-import { useAppContext } from '../context/useAppContext';
 
 void motion;
 
@@ -58,7 +58,6 @@ const features = [
 
 export const Auth = () => {
   const navigate = useNavigate();
-  const { completeOnboarding } = useAppContext();
   const [mode, setMode] = useState('login');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
@@ -82,9 +81,9 @@ export const Auth = () => {
 
     setIsSubmitting(true);
     window.setTimeout(() => {
-      navigate('/demo', {
+      navigate('/setup', {
         state: {
-          fromRegister: true,
+          authFlow: 'login',
           shopName: '',
           ownerName: loginForm.email.split('@')[0],
           email: loginForm.email,
@@ -114,9 +113,9 @@ export const Auth = () => {
 
     setIsSubmitting(true);
     window.setTimeout(() => {
-      navigate('/demo', {
+      navigate('/setup', {
         state: {
-          fromRegister: true,
+          authFlow: 'register',
           shopName: registerForm.shopName,
           ownerName: registerForm.ownerName,
           email: registerForm.email,
@@ -378,6 +377,14 @@ export const Auth = () => {
                   >
                     Create account <ArrowRight size={16} weight="bold" className="ml-2" />
                   </Button>
+
+                  <p className="text-xs text-zinc-400 leading-relaxed mt-5">
+                    By creating an account, you agree to the{' '}
+                    <Link to={APP_ROUTES.privacy} className="text-zinc-700 font-medium hover:text-zinc-950 transition-colors">
+                      Privacy Notice
+                    </Link>{' '}
+                    and consent to the collection and use of your information to power secure access and AI-generated financial insights.
+                  </p>
 
                   <p className="text-center text-sm text-zinc-400 mt-6">
                     <button type="button" onClick={() => { setMode('login'); setFormError(''); }} className="text-zinc-600 font-medium hover:text-zinc-900 transition-colors">

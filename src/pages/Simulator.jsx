@@ -1,12 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { CheckCircle, Lightning, Minus, PaperPlaneRight, Play, Plus, SpinnerGap } from '@phosphor-icons/react';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { useAppContext } from '../context/useAppContext';
+import {
+  DEMO_SIMULATOR_LIMIT_MESSAGE,
+  DEMO_SIMULATOR_PROMPTS,
+  PROMPT_KINDS,
+} from '../lib/aiAccess';
+import { APP_ROUTES } from '../lib/appRoutes';
+import { buildScenarioFromAction, buildScenarioFromQuestion } from '../lib/scenarioPresets';
 import { cn } from '../utils';
 
 void motion;
@@ -16,40 +23,7 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 80, damping: 20 } },
 };
 
-const scenarioSuggestions = [
-  'What if I hire another technician?',
-  'What if I raise prices by 10%?',
-  'What if my biggest client stops paying?',
-  'What if I buy a $15,000 lift?',
-];
-
-const fallbackScenarios = {
-  hire: {
-    monthlyImpact: 4500,
-    aiText: 'Hiring another technician adds roughly $4,500 per month in salary and benefits. It compresses the fall runway unless collections improve at the same time.',
-    label: 'New hire - full-time technician',
-  },
-  prices: {
-    monthlyImpact: -2800,
-    aiText: 'A 10% price increase adds about $2,800 per month in revenue at the current volume. It is one of the cleaner upside moves in this demo.',
-    label: 'Price increase - 10% across services',
-  },
-  client: {
-    monthlyImpact: 6000,
-    aiText: 'Losing the biggest client removes roughly $6,000 per month in revenue. That is the sharpest downside case in the current book of business.',
-    label: 'Client loss - largest account',
-  },
-  equipment: {
-    monthlyImpact: 2500,
-    aiText: 'A $15,000 equipment purchase financed over 6 months adds about $2,500 per month. The forecast stays above the target minimum, but only narrowly.',
-    label: 'Equipment - financed over 6 months',
-  },
-  default: {
-    monthlyImpact: 3000,
-    aiText: 'Based on your prompt, the simulator estimated a $3,000 monthly drag. Use the controls to stress-test how much room the shop really has.',
-    label: 'Custom scenario',
-  },
-};
+const scenarioSuggestions = DEMO_SIMULATOR_PROMPTS;
 
 function formatCurrency(value, digits = 0) {
   return `$${Number(value || 0).toLocaleString(undefined, {
@@ -78,35 +52,28 @@ function formatModelName(model) {
     .replace(/\b\w/g, (char) => char.toUpperCase()) || 'Groq';
 }
 
-function matchScenario(input) {
-  const lower = input.toLowerCase();
-
-  if (lower.includes('hire') || lower.includes('employee') || lower.includes('technician') || lower.includes('staff')) {
-    return fallbackScenarios.hire;
-  }
-
-  if (lower.includes('price') || lower.includes('raise') || lower.includes('charge more') || lower.includes('increase')) {
-    return fallbackScenarios.prices;
-  }
-
-  if (lower.includes('client') || lower.includes('customer') || lower.includes('stop paying') || lower.includes('lose') || lower.includes('leave')) {
-    return fallbackScenarios.client;
-  }
-
-  if (lower.includes('buy') || lower.includes('purchase') || lower.includes('equipment') || lower.includes('lift') || lower.includes('machine') || lower.includes('van') || lower.includes('truck')) {
-    return fallbackScenarios.equipment;
-  }
-
-  return fallbackScenarios.default;
+function matchScenario(input, promptId = null) {
+  return buildScenarioFromQuestion(input, { promptId, promptCatalog: 'simulator', source: 'fallback' }) || {
+    question: input,
+    label: 'Custom scenario',
+    summary: 'Based on your prompt, the simulator estimated a $3,000 monthly drag. Use the controls to stress-test how much room the shop really has.',
+    monthlyImpact: 3000,
+    source: 'fallback',
+  };
 }
 
 export const Simulator = () => {
+  const location = useLocation();
   const navigate = useNavigate();
+  const handledIncomingScenarioRef = useRef('');
   const {
+    accessMode,
     applyScenario,
     bankConnection,
     clearScenario,
     financialMetrics,
+    hasFullAiAccess,
+    isDemoMode,
     notify,
     problems,
     profile,
@@ -116,7 +83,9 @@ export const Simulator = () => {
     simulatorTrajectory,
     takeAction,
   } = useAppContext();
-  const [whatIfInput, setWhatIfInput] = useState('');
+  const pendingSimulatorActionId = location.state?.simulatorActionId ?? null;
+  const pendingSimulatorQuestion = location.state?.simulatorQuestion ?? null;
+  const [whatIfInput, setWhatIfInput] = useState(() => pendingSimulatorQuestion || scenarioState.question || '');
   const [isThinking, setIsThinking] = useState(false);
   const [aiResult, setAiResult] = useState(null);
   const [aiHealth, setAiHealth] = useState({
@@ -132,7 +101,7 @@ export const Simulator = () => {
   useEffect(() => {
     let isCancelled = false;
 
-    fetch('/api/health')
+    fetch(`/api/health?accessMode=${encodeURIComponent(accessMode || 'auth')}`)
       .then(async (response) => {
         const data = await response.json();
 
@@ -152,9 +121,13 @@ export const Simulator = () => {
 
         setStatusBanner({
           tone: data?.configured ? 'live' : 'warning',
-          message: data?.configured
-            ? `Live Groq ready${data?.model ? ` using ${formatModelName(data.model)}` : ''}.`
-            : 'Groq is not configured yet. The simulator will use demo fallback responses.',
+          message: isDemoMode
+            ? data?.configured
+              ? `Demo AI ready${data?.model ? ` using ${formatModelName(data.model)}` : ''}. Suggested scenarios only.`
+              : 'Demo mode is using the built-in suggested scenario answers.'
+            : data?.configured
+              ? `Live Groq ready${data?.model ? ` using ${formatModelName(data.model)}` : ''}.`
+              : 'Live AI is not configured yet. Signed-in scenarios are unavailable until Groq is set up.',
         });
       })
       .catch(() => {
@@ -170,39 +143,67 @@ export const Simulator = () => {
 
         setStatusBanner({
           tone: 'warning',
-          message: 'Could not reach the local AI backend. Restart `npm run dev` and refresh the page.',
+          message: isDemoMode
+            ? 'Could not reach the local AI backend. Demo suggestions will use the built-in scenario answers.'
+            : 'Could not reach the local AI backend. Signed-in scenarios cannot run right now.',
         });
       });
 
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [accessMode, isDemoMode]);
 
+  useEffect(() => {
+    if (!pendingSimulatorActionId) {
+      return;
+    }
+
+    const incomingScenarioKey = `${location.key}:${pendingSimulatorActionId}:${pendingSimulatorQuestion || ''}`;
+    if (handledIncomingScenarioRef.current === incomingScenarioKey) {
+      return;
+    }
+
+    const incomingScenario = buildScenarioFromAction(pendingSimulatorActionId, {
+      question: pendingSimulatorQuestion || undefined,
+      source: 'action',
+    });
+
+    if (!incomingScenario) {
+      return;
+    }
+
+    handledIncomingScenarioRef.current = incomingScenarioKey;
+    applyScenario(incomingScenario, { silent: true });
+  }, [applyScenario, location.key, pendingSimulatorActionId, pendingSimulatorQuestion]);
+
+  const hasActiveScenario = Math.abs(scenarioState.monthlyImpact) >= 100;
   const displayedResult =
-    aiResult
-    || (Math.abs(scenarioState.monthlyImpact) >= 100
-      ? {
-          label: scenarioState.label,
-          aiText: scenarioState.summary,
-          monthlyImpact: scenarioState.monthlyImpact,
-          meta: {
-            source: scenarioState.source,
-          },
-        }
-      : null);
+    aiResult?.status === 'limited' || aiResult?.status === 'unavailable'
+      ? aiResult
+      : hasActiveScenario
+        ? {
+            label: scenarioState.label,
+            aiText: scenarioState.summary,
+            monthlyImpact: scenarioState.monthlyImpact,
+            status: 'applied',
+            meta: {
+              source: scenarioState.source,
+            },
+          }
+        : null;
 
   const riskAction =
     problems.find((problem) => problem.category === 'Late Payer')
-      ? { label: 'Clear late payer risk', actionId: 'collect-late-invoice', href: '/app/problems' }
+      ? { label: 'Clear late payer risk', actionId: 'collect-late-invoice', href: APP_ROUTES.problems }
       : problems.find((problem) => problem.category === 'Cash Crunch')
-        ? { label: 'Apply payment plan', actionId: 'defer-overlap-bills', href: '/app/problems' }
-        : { label: 'Open dashboard', href: '/app/dashboard' };
+        ? { label: 'Apply payment plan', actionId: 'defer-overlap-bills', href: APP_ROUTES.problems }
+        : { label: 'Open dashboard', href: APP_ROUTES.dashboard };
 
   const lowestScenarioPoint = Math.min(...simulatorTrajectory.map((point) => point.scenario));
   const lastScenarioPoint = simulatorTrajectory[simulatorTrajectory.length - 1]?.scenario ?? financialMetrics.currentCash;
   const scenarioNarrative =
-    Math.abs(scenarioState.monthlyImpact) < 100
+    !hasActiveScenario
       ? 'You are viewing the shared baseline forecast with no extra scenario applied yet.'
       : scenarioState.monthlyImpact >= 0
         ? `This scenario removes about ${formatCurrency(Math.abs(scenarioState.monthlyImpact))} per month starting in ${scenarioState.startMonth}.`
@@ -224,32 +225,74 @@ export const Simulator = () => {
 
   const handleImpactChange = (nextAmount) => {
     const normalized = Math.max(-10000, Math.min(20000, Number(nextAmount) || 0));
+    const nextSummary =
+      hasActiveScenario
+        ? scenarioState.summary
+        : 'Manual controls are adjusting the shared forecast for the next six months.';
 
+    setAiResult(null);
     runSharedScenario(
       {
-        label:
-          scenarioState.label && scenarioState.label !== 'Baseline forecast'
-            ? scenarioState.label
-            : 'Manual scenario',
-        aiText:
-          displayedResult?.aiText
-          || 'Manual controls are adjusting the shared forecast for the next six months.',
+        label: hasActiveScenario ? scenarioState.label : 'Manual scenario',
+        aiText: nextSummary,
         monthlyImpact: normalized,
       },
       { source: 'manual' },
     );
+    setStatusBanner({
+      tone: 'neutral',
+      message: 'Manual scenario updated in the shared forecast.',
+    });
   };
 
-  const runScenario = (text) => {
-    if (!text.trim()) {
-      const fallback = fallbackScenarios.default;
-      setAiResult(fallback);
-      runSharedScenario(fallback, { question: 'Default scenario', source: 'fallback' });
+  const handleStartMonthChange = (startMonth) => {
+    setScenarioStartMonth(startMonth);
+
+    if (hasActiveScenario) {
+      setAiResult(null);
       setStatusBanner({
         tone: 'neutral',
-        message: 'Ran the built-in demo scenario. Add a question to hit the live model.',
+        message: `Scenario start month moved to ${startMonth}.`,
       });
-      notify('Ran the default scenario.');
+    }
+  };
+
+  const runScenario = (payload = {}) => {
+    const nextPayload =
+      typeof payload === 'string'
+        ? {
+            text: payload,
+            promptKind: PROMPT_KINDS.custom,
+            promptId: null,
+          }
+        : {
+            text: payload.text ?? whatIfInput,
+            promptKind: payload.promptKind ?? PROMPT_KINDS.custom,
+            promptId: payload.promptId ?? null,
+          };
+    const question = nextPayload.text || '';
+
+    if (!question.trim()) {
+      setStatusBanner({
+        tone: 'neutral',
+        message: isDemoMode
+          ? 'Demo mode: try one of the suggested scenarios below.'
+          : 'Enter a scenario question to run the live simulator.',
+      });
+      return;
+    }
+
+    if (isDemoMode && nextPayload.promptKind !== PROMPT_KINDS.suggested) {
+      setAiResult({
+        status: 'limited',
+        label: 'Demo guided mode',
+        aiText: DEMO_SIMULATOR_LIMIT_MESSAGE,
+        monthlyImpact: null,
+      });
+      setStatusBanner({
+        tone: 'warning',
+        message: DEMO_SIMULATOR_LIMIT_MESSAGE,
+      });
       return;
     }
 
@@ -258,8 +301,10 @@ export const Simulator = () => {
     setStatusBanner({
       tone: 'neutral',
       message: aiHealth.configured
-        ? `Sending your scenario to Groq${aiHealth.model ? ` using ${formatModelName(aiHealth.model)}` : ''}...`
-        : 'Trying the AI backend now. If it is unavailable, the simulator will fall back to the built-in demo logic.',
+        ? `${isDemoMode ? 'Sending the guided demo scenario' : 'Sending your scenario'} to Groq${aiHealth.model ? ` using ${formatModelName(aiHealth.model)}` : ''}...`
+        : isDemoMode
+          ? 'Trying the demo AI backend now. If it is unavailable, the simulator will use the built-in guided answer.'
+          : 'Trying the live AI backend now.',
     });
 
     fetch('/api/scenario', {
@@ -268,7 +313,10 @@ export const Simulator = () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        question: text,
+        question,
+        accessMode,
+        promptKind: nextPayload.promptKind,
+        promptId: nextPayload.promptId,
         context: {
           shop: {
             name: profile.shopName,
@@ -315,26 +363,56 @@ export const Simulator = () => {
         return data;
       })
       .then((result) => {
-        setAiResult(result);
-        runSharedScenario(result, { question: text, source: result?.meta?.source || 'groq' });
+        setAiResult(null);
+        runSharedScenario(result, { question, source: result?.meta?.source || 'groq' });
         setStatusBanner({
           tone: 'live',
-          message: `Live AI response received${result?.meta?.model ? ` from ${formatModelName(result.meta.model)}` : ''}.`,
+          message: `${isDemoMode ? 'Demo AI response received' : 'Live AI response received'}${result?.meta?.model ? ` from ${formatModelName(result.meta.model)}` : ''}.`,
         });
       })
       .catch((error) => {
-        const fallback = matchScenario(text);
         const errorMessage = error instanceof Error ? error.message : 'Scenario analysis is unavailable right now.';
-        setAiResult(fallback);
-        runSharedScenario(fallback, { question: text, source: 'fallback' });
+
+        if (hasFullAiAccess) {
+          setAiResult({
+            status: 'unavailable',
+            label: 'Live AI unavailable',
+            aiText: 'Your account has full AI access, but we could not reach Groq. Try the scenario again in a moment.',
+            monthlyImpact: null,
+          });
+          setStatusBanner({
+            tone: 'warning',
+            message: /Missing Groq API key|Groq rejected the API key|Groq rate limit|timed out/i.test(errorMessage)
+              ? errorMessage
+              : 'Live AI is unavailable for scenarios right now. Try again in a moment.',
+          });
+          notify(
+            /Missing Groq API key|Groq rejected the API key|Groq rate limit|timed out/i.test(errorMessage)
+              ? errorMessage
+              : 'Live AI is unavailable for scenarios right now. Try again in a moment.',
+            'warning',
+          );
+          return;
+        }
+
+        const fallback = matchScenario(question, nextPayload.promptId);
+        setAiResult(null);
+        runSharedScenario(
+          {
+            label: fallback.label,
+            aiText: fallback.summary,
+            monthlyImpact: fallback.monthlyImpact,
+          },
+          { question: fallback.question || question, source: fallback.source || 'fallback' },
+        );
         setStatusBanner({
           tone: 'warning',
-          message: `${errorMessage} Showing the built-in demo fallback instead.`,
+          message: `${errorMessage} Showing the built-in guided demo answer instead.`,
         });
         notify(
           /Missing Groq API key|Groq rejected the API key|Groq rate limit|timed out/i.test(errorMessage)
             ? errorMessage
-            : 'Groq is unavailable for scenarios right now. Showing the demo fallback instead.',
+            : 'Groq is unavailable for scenarios right now. Showing the guided demo answer instead.',
           'warning',
         );
       })
@@ -344,8 +422,12 @@ export const Simulator = () => {
   };
 
   const handleSuggestionClick = (suggestion) => {
-    setWhatIfInput(suggestion);
-    runScenario(suggestion);
+    setWhatIfInput(suggestion.text);
+    runScenario({
+      text: suggestion.text,
+      promptKind: PROMPT_KINDS.suggested,
+      promptId: suggestion.id,
+    });
   };
 
   const handleScenarioAction = (action) => {
@@ -376,9 +458,13 @@ export const Simulator = () => {
           >
             {aiHealth.status === 'checking'
               ? 'Checking AI'
-              : aiHealth.configured
-                ? `Live AI${aiHealth.model ? ` - ${formatModelName(aiHealth.model)}` : ''}`
-                : 'Demo Fallback'}
+              : isDemoMode
+                ? aiHealth.configured
+                  ? `Demo AI${aiHealth.model ? ` - ${formatModelName(aiHealth.model)}` : ''}`
+                  : 'Guided Demo'
+                : aiHealth.configured
+                  ? `Live AI${aiHealth.model ? ` - ${formatModelName(aiHealth.model)}` : ''}`
+                  : 'Live AI unavailable'}
           </Badge>
         </div>
       </div>
@@ -401,7 +487,7 @@ export const Simulator = () => {
               value={whatIfInput}
               onChange={(event) => setWhatIfInput(event.target.value)}
               onKeyDown={(event) => event.key === 'Enter' && runScenario(whatIfInput)}
-              placeholder="What if I hire another employee? What if sales drop 20%?"
+              placeholder={isDemoMode ? 'Demo mode: try one of the suggested scenarios' : 'What if I hire another employee? What if sales drop 20%?'}
               className="flex-1 bg-zinc-50 border border-zinc-200 rounded-xl px-5 py-3.5 text-[15px] font-medium placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900 transition-shadow"
             />
             <Button
@@ -417,11 +503,11 @@ export const Simulator = () => {
           <div className="flex flex-wrap gap-2">
             {scenarioSuggestions.map((suggestion) => (
               <button
-                key={suggestion}
+                key={suggestion.id}
                 onClick={() => handleSuggestionClick(suggestion)}
                 className="px-3.5 py-1.5 bg-zinc-50 border border-zinc-200 rounded-lg text-[13px] font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 hover:border-zinc-300 transition-all"
               >
-                {suggestion}
+                {suggestion.text}
               </button>
             ))}
           </div>
@@ -475,35 +561,63 @@ export const Simulator = () => {
                   <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                     <div className="flex items-center gap-2 mb-3">
                       <CheckCircle size={16} weight="fill" className="text-zinc-400" />
-                      <span className="text-xs font-semibold tracking-widest text-zinc-400 uppercase">{displayedResult.label}</span>
-                    </div>
-                    <p className="text-[15px] text-zinc-600 leading-relaxed">{displayedResult.aiText}</p>
-                    <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-zinc-50 border border-zinc-200 rounded-lg">
-                      <span className="text-xs font-semibold text-zinc-500">Impact:</span>
-                      <span className="text-sm font-mono font-semibold text-zinc-900">{formatImpact(displayedResult.monthlyImpact)}</span>
-                    </div>
+                          <span className="text-xs font-semibold tracking-widest text-zinc-400 uppercase">{displayedResult.label}</span>
+                        </div>
+                        {displayedResult.status === 'applied' ? (
+                          <p className="text-xs font-semibold tracking-widest text-zinc-400 uppercase mb-3">
+                            Applies from {scenarioState.startMonth}
+                          </p>
+                        ) : null}
+                        <p className="text-[15px] text-zinc-600 leading-relaxed">{displayedResult.aiText}</p>
+                    {typeof displayedResult.monthlyImpact === 'number' ? (
+                      <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-zinc-50 border border-zinc-200 rounded-lg">
+                        <span className="text-xs font-semibold text-zinc-500">Impact:</span>
+                        <span className="text-sm font-mono font-semibold text-zinc-900">{formatImpact(displayedResult.monthlyImpact)}</span>
+                      </div>
+                    ) : null}
                     <div className="mt-5 flex flex-wrap gap-3">
-                      <Button variant="primary" onClick={() => handleScenarioAction({ href: '/app/dashboard' })}>
-                        View on dashboard
-                      </Button>
-                      <Button variant="outline" onClick={() => handleScenarioAction(riskAction)}>
-                        {riskAction.label}
-                      </Button>
-                      {Math.abs(scenarioState.monthlyImpact) >= 100 ? (
-                        <Button
-                          variant="ghost"
-                          onClick={() => {
-                            clearScenario({ message: 'Scenario reset to the baseline forecast.' });
-                            setAiResult(null);
-                            setStatusBanner({
-                              tone: 'neutral',
-                              message: 'Returned to the shared baseline forecast.',
-                            });
-                          }}
-                        >
-                          Reset scenario
+                      {displayedResult.status === 'limited' ? (
+                        <Button variant="primary" onClick={() => navigate(APP_ROUTES.auth)}>
+                          Sign in for full access
                         </Button>
-                      ) : null}
+                      ) : displayedResult.status === 'unavailable' ? (
+                        <Button
+                          variant="primary"
+                          onClick={() =>
+                            runScenario({
+                              text: whatIfInput,
+                              promptKind: PROMPT_KINDS.custom,
+                              promptId: null,
+                            })
+                          }
+                        >
+                          Try again
+                        </Button>
+                      ) : (
+                        <>
+                          <Button variant="primary" onClick={() => handleScenarioAction({ href: APP_ROUTES.dashboard })}>
+                            View on dashboard
+                          </Button>
+                          <Button variant="outline" onClick={() => handleScenarioAction(riskAction)}>
+                            {riskAction.label}
+                          </Button>
+                          {hasActiveScenario ? (
+                            <Button
+                              variant="ghost"
+                              onClick={() => {
+                                clearScenario({ message: 'Scenario reset to the baseline forecast.' });
+                                setAiResult(null);
+                                setStatusBanner({
+                                  tone: 'neutral',
+                                  message: 'Returned to the shared baseline forecast.',
+                                });
+                              }}
+                            >
+                              Reset scenario
+                            </Button>
+                          ) : null}
+                        </>
+                      )}
                     </div>
                   </motion.div>
                 ) : null}
@@ -518,10 +632,10 @@ export const Simulator = () => {
           <Card className="flex flex-col h-full !p-8 border-2 border-zinc-100 hover:border-zinc-300">
             <div className="flex justify-between items-center mb-10">
               <h2 className="text-xl font-medium tracking-tight text-zinc-950">Manual Controls</h2>
-              <span className="text-xs uppercase tracking-widest font-bold text-zinc-400">
-                {Math.abs(scenarioState.monthlyImpact) >= 100 ? 'Applied' : 'Baseline'}
-              </span>
-            </div>
+                <span className="text-xs uppercase tracking-widest font-bold text-zinc-400">
+                  {hasActiveScenario ? 'Applied' : 'Baseline'}
+                </span>
+              </div>
 
             <div className="mb-10">
               <label className="block text-sm font-semibold tracking-widest text-zinc-500 uppercase mb-4">Monthly Impact</label>
@@ -539,15 +653,15 @@ export const Simulator = () => {
             </div>
 
             <div className="mb-12">
-              <label className="block text-sm font-semibold tracking-widest text-zinc-500 uppercase mb-4">Start Month</label>
-              <select
-                value={scenarioState.startMonth}
-                onChange={(event) => setScenarioStartMonth(event.target.value)}
-                className="w-full bg-white p-4 rounded-xl border border-zinc-200 text-[16px] font-medium text-zinc-900 focus:outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-100 appearance-none shadow-sm"
-              >
-                {scenarioMonthOptions.map((month) => (
-                  <option key={month}>{month}</option>
-                ))}
+                <label className="block text-sm font-semibold tracking-widest text-zinc-500 uppercase mb-4">Start Month</label>
+                <select
+                  value={scenarioState.startMonth}
+                  onChange={(event) => handleStartMonthChange(event.target.value)}
+                  className="w-full bg-white p-4 rounded-xl border border-zinc-200 text-[16px] font-medium text-zinc-900 focus:outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-100 appearance-none shadow-sm"
+                >
+                  {scenarioMonthOptions.map((month) => (
+                    <option key={month}>{month}</option>
+                  ))}
               </select>
             </div>
 
@@ -555,7 +669,7 @@ export const Simulator = () => {
               <Button className="w-full py-4 text-[15px] shadow-md border-zinc-900" variant="primary" onClick={() => runScenario(whatIfInput)}>
                 Run Simulation <Play weight="fill" className="ml-2" />
               </Button>
-              {Math.abs(scenarioState.monthlyImpact) >= 100 ? (
+              {hasActiveScenario ? (
                 <Button
                   className="w-full"
                   variant="outline"

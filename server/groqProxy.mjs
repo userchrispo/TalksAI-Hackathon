@@ -1,7 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import {
+  ACCESS_MODES,
+  DEMO_ASSISTANT_LIMIT_MESSAGE,
+  DEMO_SIMULATOR_LIMIT_MESSAGE,
+  PROMPT_KINDS,
+  isAllowedDemoAssistantPrompt,
+  isAllowedDemoScenarioPrompt,
+} from '../src/lib/aiAccess.js';
 
-const DEFAULT_MODEL = 'openai/gpt-oss-20b';
+const DEFAULT_DEMO_MODEL = 'openai/gpt-oss-20b';
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_BODY_BYTES = 24 * 1024;
 const MAX_QUESTION_CHARS = 600;
@@ -94,9 +102,10 @@ function readSecrets(root = process.cwd()) {
     : {};
 
   const apiKey = process.env.GROQ_API_KEY || localEnv.GROQ_API_KEY || '';
-  const model = process.env.GROQ_MODEL || localEnv.GROQ_MODEL || DEFAULT_MODEL;
+  const authModel = process.env.GROQ_MODEL || localEnv.GROQ_MODEL || DEFAULT_DEMO_MODEL;
+  const demoModel = process.env.GROQ_DEMO_MODEL || localEnv.GROQ_DEMO_MODEL || DEFAULT_DEMO_MODEL;
 
-  return { apiKey, model };
+  return { apiKey, authModel, demoModel };
 }
 
 function createHttpError(statusCode, message) {
@@ -110,6 +119,27 @@ function trimText(value, maxLength = MAX_TEXT_CHARS) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, maxLength);
+}
+
+function normalizeAccessMode(value) {
+  return value === ACCESS_MODES.demo ? ACCESS_MODES.demo : ACCESS_MODES.auth;
+}
+
+function normalizePromptKind(value) {
+  return value === PROMPT_KINDS.suggested ? PROMPT_KINDS.suggested : PROMPT_KINDS.custom;
+}
+
+function resolveModelForAccessMode(secrets, accessMode) {
+  return accessMode === ACCESS_MODES.demo ? secrets.demoModel : secrets.authModel;
+}
+
+function readAccessModeFromRequest(req) {
+  try {
+    const url = new URL(req?.url || '/', 'http://localhost');
+    return normalizeAccessMode(url.searchParams.get('accessMode'));
+  } catch {
+    return ACCESS_MODES.auth;
+  }
 }
 
 function sanitizeContext(value, depth = 0) {
@@ -342,9 +372,12 @@ export async function generateAssistantReply({
   question,
   context = {},
   history = [],
+  accessMode = ACCESS_MODES.auth,
   root = process.cwd(),
 }) {
-  const { apiKey, model } = readSecrets(root);
+  const secrets = readSecrets(root);
+  const { apiKey } = secrets;
+  const model = resolveModelForAccessMode(secrets, normalizeAccessMode(accessMode));
   const safeQuestion = trimText(question, MAX_QUESTION_CHARS);
   const safeContext = sanitizeContext(context);
   const safeHistory = sanitizeHistory(history);
@@ -394,9 +427,12 @@ export async function generateAssistantReply({
 export async function generateScenarioReply({
   question,
   context = {},
+  accessMode = ACCESS_MODES.auth,
   root = process.cwd(),
 }) {
-  const { apiKey, model } = readSecrets(root);
+  const secrets = readSecrets(root);
+  const { apiKey } = secrets;
+  const model = resolveModelForAccessMode(secrets, normalizeAccessMode(accessMode));
   const safeQuestion = trimText(question, MAX_QUESTION_CHARS);
   const safeContext = sanitizeContext(context);
 
@@ -514,13 +550,16 @@ function writeJson(res, statusCode, data) {
   res.end(JSON.stringify(data));
 }
 
-export function getHealthStatus(root = process.cwd()) {
-  const { apiKey, model } = readSecrets(root);
+export function getHealthStatus(root = process.cwd(), accessMode = ACCESS_MODES.auth) {
+  const secrets = readSecrets(root);
+  const { apiKey } = secrets;
+  const model = resolveModelForAccessMode(secrets, normalizeAccessMode(accessMode));
 
   return {
     ok: true,
     configured: Boolean(apiKey),
     model,
+    accessMode: normalizeAccessMode(accessMode),
   };
 }
 
@@ -540,9 +579,27 @@ export async function handleApiRequest(req, res, root) {
     const rawBody = await readRequestBody(req);
     const body = rawBody ? JSON.parse(rawBody) : {};
     const question = String(body?.question || '').trim();
+    const accessMode = normalizeAccessMode(body?.accessMode);
+    const promptKind = normalizePromptKind(body?.promptKind);
+    const promptId = trimText(body?.promptId, 80);
 
     if (!question) {
       writeJson(res, 400, { error: 'Question is required.' });
+      return;
+    }
+
+    if (
+      accessMode === ACCESS_MODES.demo
+      && !isAllowedDemoAssistantPrompt({
+        promptKind,
+        promptId,
+        question,
+      })
+    ) {
+      writeJson(res, 403, {
+        code: 'DEMO_LIMITED',
+        error: DEMO_ASSISTANT_LIMIT_MESSAGE,
+      });
       return;
     }
 
@@ -550,15 +607,18 @@ export async function handleApiRequest(req, res, root) {
       question,
       context: body?.context || {},
       history: Array.isArray(body?.history) ? body.history : [],
+      accessMode,
       root,
     });
 
-    const { model } = readSecrets(root);
+    const secrets = readSecrets(root);
+    const model = resolveModelForAccessMode(secrets, accessMode);
     writeJson(res, 200, {
       ...reply,
       meta: {
         source: 'groq',
         model,
+        accessMode,
       },
     });
   } catch (error) {
@@ -589,24 +649,45 @@ export async function handleScenarioRequest(req, res, root) {
     const rawBody = await readRequestBody(req);
     const body = rawBody ? JSON.parse(rawBody) : {};
     const question = String(body?.question || '').trim();
+    const accessMode = normalizeAccessMode(body?.accessMode);
+    const promptKind = normalizePromptKind(body?.promptKind);
+    const promptId = trimText(body?.promptId, 80);
 
     if (!question) {
       writeJson(res, 400, { error: 'Scenario question is required.' });
       return;
     }
 
+    if (
+      accessMode === ACCESS_MODES.demo
+      && !isAllowedDemoScenarioPrompt({
+        promptKind,
+        promptId,
+        question,
+      })
+    ) {
+      writeJson(res, 403, {
+        code: 'DEMO_LIMITED',
+        error: DEMO_SIMULATOR_LIMIT_MESSAGE,
+      });
+      return;
+    }
+
     const reply = await generateScenarioReply({
       question,
       context: body?.context || {},
+      accessMode,
       root,
     });
 
-    const { model } = readSecrets(root);
+    const secrets = readSecrets(root);
+    const model = resolveModelForAccessMode(secrets, accessMode);
     writeJson(res, 200, {
       ...reply,
       meta: {
         source: 'groq',
         model,
+        accessMode,
       },
     });
   } catch (error) {
@@ -639,7 +720,7 @@ export function groqApiPlugin(root = process.cwd()) {
   };
 
   const healthRouteHandler = (req, res) => {
-    writeJson(res, 200, getHealthStatus(root));
+    writeJson(res, 200, getHealthStatus(root, readAccessModeFromRequest(req)));
   };
 
   return {

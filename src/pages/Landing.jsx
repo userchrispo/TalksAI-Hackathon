@@ -5,6 +5,7 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Warning, ArrowRight, Target, Funnel, ChartLineUp, Lightning, CaretRight, CheckCircle } from '@phosphor-icons/react';
 import { Link } from 'react-router-dom';
+import { APP_ROUTES } from '../lib/appRoutes';
 
 void motion;
 
@@ -167,10 +168,10 @@ export const Landing = () => {
             </motion.p>
             
             <motion.div variants={fadeIn} className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
-              <Link to="/auth">
+              <Link to={APP_ROUTES.auth}>
                 <Button magnetic variant="primary" className="h-[52px] px-8 text-[15px] shadow-[0_8px_24px_rgba(0,0,0,0.12)]">Start free trial</Button>
               </Link>
-              <Link to="/demo">
+              <Link to={APP_ROUTES.demo}>
                 <Button magnetic variant="outline" className="h-[52px] px-8 text-[15px]">View live demo</Button>
               </Link>
             </motion.div>
@@ -474,7 +475,7 @@ export const Landing = () => {
                   ))}
                 </ul>
                 
-                <Link to="/auth">
+                <Link to={APP_ROUTES.auth}>
                   <Button magnetic variant="primary" className="w-full h-[56px] text-[16px] shadow-[0_8px_24px_rgba(0,0,0,0.12)]">Join the Beta</Button>
                 </Link>
               </div>
@@ -487,13 +488,14 @@ export const Landing = () => {
       <footer className="py-16 bg-white border-t border-zinc-200 font-medium">
         <div className="max-w-[1400px] mx-auto px-6 lg:px-12 flex flex-col sm:flex-row justify-between items-start md:items-center gap-8 text-sm text-zinc-500">
           <div className="flex flex-col">
-            <span className="font-semibold text-zinc-950 tracking-tight text-lg mb-1">TALKS AI</span> 
+            <span className="font-semibold text-zinc-950 tracking-tight text-lg mb-1">TALKS AI</span>
             <span>© 2026. All rights reserved.</span>
           </div>
-          <div className="flex gap-10">
-            <a href="#" className="hover:text-zinc-950 transition-colors">Documentation</a>
-            <a href="#" className="hover:text-zinc-950 transition-colors">Security</a>
-            <a href="#" className="hover:text-zinc-950 transition-colors">Support</a>
+          <div className="flex flex-wrap gap-x-8 gap-y-3">
+            <Link to={APP_ROUTES.privacy} className="hover:text-zinc-950 transition-colors">Privacy Notice</Link>
+            <a href="#how-it-works" className="hover:text-zinc-950 transition-colors">How it works</a>
+            <a href="#pricing" className="hover:text-zinc-950 transition-colors">Pricing</a>
+            <Link to={APP_ROUTES.auth} className="hover:text-zinc-950 transition-colors">Start free trial</Link>
           </div>
         </div>
       </footer>

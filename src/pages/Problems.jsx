@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { Warning, TrendUp, WarningCircle, ArrowUpRight, CheckCircle, CaretDown, CaretUp } from '@phosphor-icons/react';
+import { Warning, TrendUp, WarningCircle, CheckCircle, CaretDown, CaretUp } from '@phosphor-icons/react';
 import { useAppContext } from '../context/useAppContext';
+import { APP_ROUTES } from '../lib/appRoutes';
 
 void motion;
 
@@ -21,7 +23,8 @@ const itemVariants = {
 const filters = ["All", "Cash Crunch", "Late Payer", "Rising Costs"];
 
 export const Problems = () => {
-  const { problems, resolveProblem } = useAppContext();
+  const navigate = useNavigate();
+  const { notify, problems } = useAppContext();
   const [activeFilter, setActiveFilter] = useState('All');
   const [expandedId, setExpandedId] = useState(null);
 
@@ -89,7 +92,7 @@ export const Problems = () => {
                       <p className="text-[16px] text-zinc-500 leading-relaxed max-w-prose">{risk.desc}</p>
                       {isExpanded ? (
                         <div className="mt-5 p-4 rounded-2xl bg-zinc-50 border border-zinc-200 text-sm text-zinc-600 leading-7">
-                          This risk is part of the live demo flow. Resolve it to update the dashboard totals and clear the alert from the sidebar.
+                          Ask AI for fix to generate a repair plan in the AI Fixes workspace, then apply that fix to update the dashboard totals and clear the alert from the sidebar.
                         </div>
                       ) : null}
                     </div>
@@ -98,9 +101,17 @@ export const Problems = () => {
                       <Button 
                         variant="outline" 
                         className="w-full md:w-auto bg-white py-3 hover:bg-zinc-950 hover:text-white transition-colors"
-                        onClick={() => resolveProblem(risk.id, `Resolved: ${risk.action}`)}
+                        onClick={() => {
+                          notify(`Generating AI fix for ${risk.category.toLowerCase()}...`);
+                          navigate(`${APP_ROUTES.fixes}?problem=${risk.id}`, {
+                            state: {
+                              from: 'problems',
+                              generatedProblemId: risk.id,
+                            },
+                          });
+                        }}
                       >
-                        {risk.action}
+                        Ask AI for fix
                       </Button>
                       <button
                         type="button"

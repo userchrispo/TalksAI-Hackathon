@@ -1,19 +1,20 @@
 import React from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import { SquaresFour, ChatTeardrop, Warning, ChartLineUp, GearSix, X, SignOut } from '@phosphor-icons/react';
+import { NavLink } from 'react-router-dom';
+import { SquaresFour, ChatTeardrop, Lightning, Warning, ChartLineUp, GearSix, X, SignOut } from '@phosphor-icons/react';
 import { useAppContext } from '../../context/useAppContext';
+import { APP_ROUTES } from '../../lib/appRoutes';
 
 export const Sidebar = ({ mobileOpen, onClose }) => {
   const { problems, profile, logout } = useAppContext();
-  const location = useLocation();
   const problemCount = problems.length;
 
   const navItems = [
-    { to: '/app/dashboard', icon: <SquaresFour size={22} weight="regular" />, label: 'Dashboard' },
-    { to: '/app/assistant', icon: <ChatTeardrop size={22} weight="regular" />, label: 'AI Assistant' },
-    { to: '/app/problems', icon: <Warning size={22} weight="regular" />, label: 'Potential Problems', badge: problemCount },
-    { to: '/app/simulator', icon: <ChartLineUp size={22} weight="regular" />, label: 'Growth Simulator' },
-    { to: '/app/settings', icon: <GearSix size={22} weight="regular" />, label: 'Settings' },
+    { to: APP_ROUTES.dashboard, icon: <SquaresFour size={22} weight="regular" />, label: 'Dashboard' },
+    { to: APP_ROUTES.assistant, icon: <ChatTeardrop size={22} weight="regular" />, label: 'AI Assistant' },
+    { to: APP_ROUTES.problems, icon: <Warning size={22} weight="regular" />, label: 'Potential Problems', badge: problemCount },
+    { to: APP_ROUTES.fixes, icon: <Lightning size={22} weight="regular" />, label: 'AI Fixes' },
+    { to: APP_ROUTES.simulator, icon: <ChartLineUp size={22} weight="regular" />, label: 'Growth Simulator' },
+    { to: APP_ROUTES.settings, icon: <GearSix size={22} weight="regular" />, label: 'Settings' },
   ];
 
   const handleNavClick = () => {
@@ -59,7 +60,7 @@ export const Sidebar = ({ mobileOpen, onClose }) => {
             onClick={() => {
               logout();
               // Navigate to the root landing page after logging out
-              window.location.href = '/';
+              window.location.href = APP_ROUTES.home;
               if (onClose) onClose();
             }}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50 transition-all duration-200 group"
